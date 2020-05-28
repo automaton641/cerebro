@@ -1,3 +1,5 @@
+use rand::prelude::*;
+use rand::rngs::ThreadRng;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -67,6 +69,24 @@ impl Cerebro {
         }
         return cerebro;
     }
+    fn place_particles(&mut self, rng: &mut ThreadRng) {
+        let mut iteration = 0;
+        let spacing = 4;
+        for x in 0..self.width / 2 {
+            for y in 0..self.height {
+                if iteration == 0 {
+                    let random: usize = rng.gen();
+                    let modulus: usize = self.particle_types.len();
+                    self.space[x as usize][y as usize].particle =
+                        Some(Particle::new(random % modulus));
+                }
+                iteration += 1;
+                iteration %= spacing;
+            }
+            iteration += 1;
+            iteration %= spacing;
+        }
+    }
     fn reset_fields(&mut self) {
         for column in &mut self.space {
             for cell in column {
@@ -74,7 +94,6 @@ impl Cerebro {
                 cell.field.y = 0;
             }
         }
-    
     }
 
     fn get_cell(&mut self, x: i128, y: i128) -> &mut Cell {
@@ -97,8 +116,12 @@ impl Cerebro {
 
     fn apply_charge(&mut self, particle_type: usize, x: i128, y: i128) {
         let charge_x_init = self.particle_types[particle_type].charge.x;
-        for xi in 0..charge_x_init {
-            let charge_x = charge_x_init - xi;
+        for xi in 0..charge_x_init.abs() {
+            let charge_x = if charge_x_init < 0 {
+                charge_x_init + xi
+            } else {
+                charge_x_init - xi
+            };
             for dx in -xi..=xi {
                 for dy in -xi..=xi {
                     let cell = self.get_cell(x + dx, y + dy);
@@ -107,8 +130,12 @@ impl Cerebro {
             }
         }
         let charge_y_init = self.particle_types[particle_type].charge.y;
-        for yi in 0..charge_y_init {
-            let charge_y = charge_y_init - yi;
+        for yi in 0..charge_y_init.abs() {
+            let charge_y = if charge_y_init < 0 {
+                charge_y_init + yi
+            } else {
+                charge_y_init - yi
+            };
             for dx in -yi..=yi {
                 for dy in -yi..=yi {
                     let cell = self.get_cell(x + dx, y + dy);
@@ -127,7 +154,6 @@ impl Cerebro {
                         has_particle = true;
                         particle_type = particle.particle_type;
                     }
-                    ,
                     None => do_nothing(),
                 }
                 if has_particle {
@@ -144,10 +170,12 @@ impl Cerebro {
                     let cell = self.get_cell(x, y);
                     let particle = &mut cell.particle;
                     match particle {
-                        Some(particle) => if !particle.already_moved {
-                            has_particle = true;
-                            particle.already_moved = true;
-                        },
+                        Some(particle) => {
+                            if !particle.already_moved {
+                                has_particle = true;
+                                particle.already_moved = true;
+                            }
+                        }
                         None => do_nothing(),
                     }
                 }
@@ -160,13 +188,15 @@ impl Cerebro {
                         field_y = cell.field.y;
                     }
                     let mut can_move: bool = false;
-                    match &self.get_cell(x + field_x , y + field_y).particle {
+                    match &self.get_cell(x + field_x, y + field_y).particle {
                         Some(_particle) => do_nothing(),
-                        None => {can_move = true;},
+                        None => {
+                            can_move = true;
+                        }
                     }
                     if can_move {
                         let particle = self.get_cell(x, y).particle.take();
-                        self.get_cell(x + field_x , y + field_y).particle = particle;
+                        self.get_cell(x + field_x, y + field_y).particle = particle;
                     }
                 }
             }
@@ -176,7 +206,9 @@ impl Cerebro {
         for column in &mut self.space {
             for cell in column {
                 match &mut cell.particle {
-                    Some(particle) => {particle.already_moved = false;},
+                    Some(particle) => {
+                        particle.already_moved = false;
+                    }
                     None => do_nothing(),
                 }
             }
@@ -307,18 +339,34 @@ fn draw_cerebro(cerebro: &Cerebro, pixels: &mut Vec<u8>, width: usize, cell_size
 }
 
 fn main() {
-    let particle = Particle::new(0);
-    println!("particle {}", particle);
-    let mut cerebro = Cerebro::new(8, 4);
-    cerebro.space[0][0].particle = Some(particle);
-    cerebro
-        .particle_types
-        .push(ParticleType::new(1, 0, 255, 0, 128));
-    println!("{}", cerebro.space[0][0]);
-
+    let mut cerebro = Cerebro::new(128, 64);
+    //cerebro.space[0][0].particle = Some(Particle::new(0));
+    //cerebro.space[4][0].particle = Some(Particle::new(1));
+    let max_deviation: i128 = 2;
+    let mut combinations: i128 = 0;
+    for _x in -max_deviation..=max_deviation {
+        for _y in -max_deviation..=max_deviation {
+            combinations += 1;
+        }
+    }
+    let mut combination: i128 = 0;
+    for x in -max_deviation..=max_deviation {
+        for y in -max_deviation..=max_deviation {
+            let color: u64 = combination as u64 * (16777216 / combinations as u64);
+            let red: u8 = color as u8;
+            let green: u8 = (color >> 8) as u8;
+            let blue: u8 = (color >> 16) as u8;
+            cerebro
+                .particle_types
+                .push(ParticleType::new(x, y, red, green, blue));
+            combination += 1;
+        }
+    }
+    let mut rng = thread_rng();
+    cerebro.place_particles(&mut rng);
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
-    let cell_size: usize = 128;
+    let cell_size: usize = 8;
     let width: u32 = cerebro.width as u32 * cell_size as u32;
     let height: u32 = cerebro.height as u32 * cell_size as u32;
     let window = video_subsystem
@@ -361,7 +409,7 @@ fn main() {
             }
         }
         if pre_iteration == 0 {
-            println!("iteration");
+            //println!("iteration");
             draw_cerebro(&cerebro, &mut pixels, width as usize, cell_size);
             texture
                 .update(texture_rectangle, &pixels, width as usize * 4)
@@ -373,7 +421,7 @@ fn main() {
             cerebro.iterate();
         }
         pre_iteration += 1;
-        pre_iteration %= 64;
+        pre_iteration %= 1;
         thread::sleep(Duration::new(0, 1_000_000_000u32 / 64));
     }
 }
